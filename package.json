@@ -41,5 +41,6 @@
         "autoscroll",
         "SVG"
     ],
-    "license": "MIT"
+    "license": "MIT",
+    "typings": "interact.d.ts"
 }
