@@ -1,24 +1,36 @@
-const utils   = require('./utils');
-const events  = require('./utils/events');
-const signals = require('./utils/Signals').new();
+const Eventable = require('./Eventable');
+const defaults  = require('./defaultOptions');
+const utils     = require('./utils');
+const browser   = require('./utils/browser');
+const events    = require('./utils/events');
+const Signals   = require('./utils/Signals');
+
+const { getWindow } = require('./utils/window');
 
 const scope = {
-  signals,
+  Signals,
+  signals: new Signals(),
+  browser,
   events,
   utils,
+  defaults,
+  Eventable,
+
+  // all active and idle interactions
+  interactions: [],
 
   // main document
   document: require('./utils/domObjects').document,
   // all documents being listened to
-  documents: [],
+  documents: [/* { doc, options } */],
 
-  addDocument: function (doc, win) {
+  addDocument (doc, options) {
     // do nothing if document is already known
-    if (utils.contains(scope.documents, doc)) { return false; }
+    if (scope.getDocIndex(doc) !== -1) { return false; }
 
-    win = win || scope.getWindow(doc);
+    const win = getWindow(doc);
 
-    scope.documents.push(doc);
+    scope.documents.push({ doc, options });
     events.documents.push(doc);
 
     // don't add an unload event for the main document
@@ -27,25 +39,39 @@ const scope = {
       events.add(win, 'unload', scope.onWindowUnload);
     }
 
-    signals.fire('add-document', { doc, win });
+    scope.signals.fire('add-document', { doc, win, scope, options });
   },
 
-  removeDocument: function (doc, win) {
-    const index = utils.indexOf(scope.documents, doc);
+  removeDocument (doc) {
+    const index = scope.getDocIndex(doc);
 
-    win = win || scope.getWindow(doc);
+    const win = getWindow(doc);
+    const options = scope.documents[index].options;
 
     events.remove(win, 'unload', scope.onWindowUnload);
 
     scope.documents.splice(index, 1);
     events.documents.splice(index, 1);
 
-    signals.fire('remove-document', { win, doc });
+    scope.signals.fire('remove-document', { doc, win, scope, options });
   },
 
-  onWindowUnload: function () {
-    scope.removeDocument(this.document, this);
+  onWindowUnload (event) {
+    scope.removeDocument(event.target.document);
+  },
+
+  getDocIndex (doc) {
+    for (let i = 0; i < scope.documents.length; i++) {
+      if (scope.documents[i].doc === doc) {
+        return i;
+      }
+    }
+
+    return -1;
   },
 };
 
 module.exports = scope;
+
+require('./Interaction').init(scope);
+require('./docEvents').init(scope);

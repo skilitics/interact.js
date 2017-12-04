@@ -1,4 +1,10 @@
-## Upcoming Changes
+## v1.3.1
+ - allowed calling `draggable.unset()` during `dragend` and `drop` event
+   listeners ([issue #560](https://github.com/taye/interact.js/issues/560))
+ - allowed snap to be enabled with falsey targets value [issue
+   #562](https://github.com/taye/interact.js/issues/562)
+
+## v1.3.0
 
 Most notably:
 
@@ -6,11 +12,11 @@ Most notably:
    #399](https://github.com/taye/interact.js/issues/399)
  - major refactor with [PR #231](https://github.com/taye/interact.js/pull/231).
  - removed deprecated methods:
-   - `Interactable` - `squareResize`, `snap`, `restrict`, `inertia`,
-     `autoScroll`, `accept`, `dropzone` - `interact` - `enabbleDragging`,
-     `enableResizing`, `enableGesturing`, `margin`
- - new `delay` option for starting actions
-   ([f688eba](https://github.com/taye/interact.js/commit/f688eba))
+   - `Interactable`: `squareResize`, `snap`, `restrict`, `inertia`,
+     `autoScroll`, `accept`
+   - `interact`: `enabbleDragging`, `enableResizing`, `enableGesturing`,
+     `margin`
+ - new `hold` option for starting actions
  - new `interaction.end()` method
    ([df963b0](https://github.com/taye/interact.js/commit/df963b0))
  - `snap.offset` `self` option ([issue

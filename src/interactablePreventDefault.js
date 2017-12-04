@@ -1,24 +1,21 @@
 const Interactable = require('./Interactable');
-const Interaction  = require('./Interaction');
 const scope        = require('./scope');
 const is           = require('./utils/is');
 const events       = require('./utils/events');
 
 const { nodeContains, matchesSelector } = require('./utils/domUtils');
+const { getWindow } = require('./utils/window');
 
-/*\
- * Interactable.preventDefault
- [ method ]
- *
- * Returns or sets whether to prevent the browser's default behaviour
- * in response to pointer events. Can be set to:
+/**
+ * Returns or sets whether to prevent the browser's default behaviour in
+ * response to pointer events. Can be set to:
  *  - `'always'` to always prevent
  *  - `'never'` to never prevent
  *  - `'auto'` to let interact.js try to determine what would be best
  *
- - newValue (string) #optional `true`, `false` or `'auto'`
- = (string | Interactable) The current setting or this Interactable
-\*/
+ * @param {string} [newValue] `true`, `false` or `'auto'`
+ * @return {string | Interactable} The current setting or this Interactable
+ */
 Interactable.prototype.preventDefault = function (newValue) {
   if (/^(always|never|auto)$/.test(newValue)) {
     this.options.preventDefault = newValue;
@@ -45,10 +42,14 @@ Interactable.prototype.checkAndPreventDefault = function (event) {
 
   // setting === 'auto'
 
-  // don't preventDefault if the browser supports passiveEvents
-  // CSS touch-action and user-selecct should be used instead
-  if (events.supportsOptions) {
-    return;
+  // don't preventDefault of touch{start,move} events if the browser supports passive
+  // events listeners. CSS touch-action and user-selecct should be used instead
+  if (events.supportsOptions && /^touch(start|move)$/.test(event.type)) {
+    const docOptions = scope.getDocIndex(getWindow(event.target).document);
+
+    if (!(docOptions && docOptions.events) || docOptions.events.passive !== false) {
+      return;
+    }
   }
 
   // don't preventDefault of pointerdown events
@@ -72,11 +73,11 @@ function onInteractionEvent ({ interaction, event }) {
 }
 
 for (const eventSignal of ['down', 'move', 'up', 'cancel']) {
-  Interaction.signals.on(eventSignal, onInteractionEvent);
+  scope.Interaction.signals.on(eventSignal, onInteractionEvent);
 }
 
 // prevent native HTML5 drag on interact.js target elements
-Interaction.docEvents.dragstart = function preventNativeDrag (event) {
+scope.docEvents.eventMap.dragstart = function preventNativeDrag (event) {
   for (const interaction of scope.interactions) {
 
     if (interaction.element

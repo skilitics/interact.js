@@ -1,82 +1,65 @@
-const pointerEvents = require('./base');
-const Interactable  = require('../Interactable');
-const browser       = require('../utils/browser');
 const is            = require('../utils/is');
-const domUtils      = require('../utils/domUtils');
-const scope         = require('../scope');
 const extend        = require('../utils/extend');
 const { merge }     = require('../utils/arr');
 
-pointerEvents.signals.on('collect-targets', function ({ targets, element, type, eventTarget }) {
-  function collectSelectors (interactable, selector, context) {
-    const els = browser.useMatchesSelectorPolyfill
-        ? context.querySelectorAll(selector)
-        : undefined;
+function init (scope) {
+  const {
+    pointerEvents,
+    Interactable,
+  } = scope;
 
-    const eventable = interactable.events;
-    const options = eventable.options;
+  pointerEvents.signals.on('collect-targets', function ({ targets, element, type, eventTarget }) {
+    scope.interactables.forEachMatch(element, interactable => {
+      const eventable = interactable.events;
+      const options = eventable.options;
 
-    if (eventable[type]
+      if (eventable[type]
         && is.element(element)
-        && domUtils.matchesSelector(element, selector, els)
         && interactable.testIgnoreAllow(options, element, eventTarget)) {
 
-      targets.push({
-        element,
-        eventable,
-        props: { interactable },
-      });
-    }
-  }
+        targets.push({
+          element,
+          eventable,
+          props: { interactable },
+        });
+      }
+    });
+  });
 
-  const interactable = scope.interactables.get(element);
+  Interactable.signals.on('new', function ({ interactable }) {
+    interactable.events.getRect = function (element) {
+      return interactable.getRect(element);
+    };
+  });
 
-  if (interactable) {
-    const eventable = interactable.events;
-    const options = eventable.options;
+  Interactable.signals.on('set', function ({ interactable, options }) {
+    extend(interactable.events.options, pointerEvents.defaults);
+    extend(interactable.events.options, options);
+  });
 
-    if (eventable[type]
-        && interactable.testIgnoreAllow(options, element, eventTarget)) {
-      targets.push({
-        element,
-        eventable,
-        props: { interactable },
-      });
-    }
-  }
+  merge(Interactable.eventTypes, pointerEvents.types);
 
-  scope.interactables.forEachSelector(collectSelectors, element);
-});
+  Interactable.prototype.pointerEvents = function (options) {
+    extend(this.events.options, options);
 
-Interactable.signals.on('new', function ({ interactable }) {
-  interactable.events.getRect = function (element) {
-    return interactable.getRect(element);
+    return this;
   };
-});
 
-Interactable.signals.on('set', function ({ interactable, options }) {
-  extend(interactable.events.options, pointerEvents.defaults);
-  extend(interactable.events.options, options);
-});
+  const __backCompatOption = Interactable.prototype._backCompatOption;
 
-merge(Interactable.eventTypes, pointerEvents.types);
+  Interactable.prototype._backCompatOption = function (optionName, newValue) {
+    const ret = __backCompatOption.call(this, optionName, newValue);
 
-Interactable.prototype.pointerEvents = function (options) {
-  extend(this.events.options, options);
+    if (ret === this) {
+      this.events.options[optionName] = newValue;
+    }
 
-  return this;
+    return ret;
+  };
+
+  Interactable.settingsMethods.push('pointerEvents');
+}
+
+module.exports = {
+  init,
 };
-
-const __backCompatOption = Interactable.prototype._backCompatOption;
-
-Interactable.prototype._backCompatOption = function (optionName, newValue) {
-  const ret = __backCompatOption.call(this, optionName, newValue);
-
-  if (ret === this) {
-    this.events.options[optionName] = newValue;
-  }
-
-  return ret;
-};
-
-Interactable.settingsMethods.push('pointerEvents');

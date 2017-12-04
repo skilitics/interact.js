@@ -1,7 +1,10 @@
 require('./Interaction');
+require('./docEvents');
 
 // Legacy browser support
 //require('./legacyBrowsers');
+
+require('./Eventable');
 
 // pointerEvents
 require('./pointerEvents/base');
@@ -17,11 +20,10 @@ require('./pointerEvents/holdRepeat');
 //require('./modifiers/restrict');
 require('./modifiers/restrictSize');
 
-// delay
-//require('./autoStart/delay');
+// autoStart hold
+require('./autoStart/hold');
 
 // actions
-require('./actions/base');
 //require('./actions/gesture');
 //require('./actions/resize');
 require('./actions/drag');

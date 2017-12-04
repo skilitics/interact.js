@@ -13,18 +13,11 @@ const browser = {
   // Does the browser support PointerEvents
   supportsPointerEvent: !!domObjects.PointerEvent,
 
-  isIE8: ('attachEvent' in window) && !('addEventListener' in window),
-
-  // Opera Mobile must be handled differently
-  isOperaMobile: (navigator.appName === 'Opera'
-      && browser.supportsTouch
-      && navigator.userAgent.match('Presto')),
-
   // scrolling doesn't change the result of getClientRects on iOS 7
   isIOS7: (/iP(hone|od|ad)/.test(navigator.platform)
            && /OS 7[^\d]/.test(navigator.appVersion)),
 
-  isIe9OrOlder: /MSIE (8|9)/.test(navigator.userAgent),
+  isIe9: /MSIE 9/.test(navigator.userAgent),
 
   // prefix matchesSelector
   prefixedMatchesSelector: 'matches' in Element.prototype
@@ -32,8 +25,6 @@ const browser = {
     ? 'webkitMatchesSelector': 'mozMatchesSelector' in Element.prototype
     ? 'mozMatchesSelector': 'oMatchesSelector' in Element.prototype
     ? 'oMatchesSelector': 'msMatchesSelector',
-
-  useMatchesSelectorPolyfill: false,
 
   pEventTypes: (domObjects.PointerEvent
     ? (domObjects.PointerEvent === window.MSPointerEvent
@@ -60,6 +51,9 @@ const browser = {
 
 };
 
-browser.useMatchesSelectorPolyfill = !is.function(Element.prototype[browser.prefixedMatchesSelector]);
+// Opera Mobile must be handled differently
+browser.isOperaMobile = (navigator.appName === 'Opera'
+  && browser.supportsTouch
+  && navigator.userAgent.match('Presto'));
 
 module.exports = browser;

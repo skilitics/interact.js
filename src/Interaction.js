@@ -1,29 +1,59 @@
-const scope      = require('./scope');
-const utils      = require('./utils');
-const events     = require('./utils/events');
-const browser    = require('./utils/browser');
-const domObjects = require('./utils/domObjects');
-const finder     = require('./utils/interactionFinder');
-const signals    = require('./utils/Signals').new();
+const utils = require('./utils');
 
-const listeners   = {};
-const methodNames = [
-  'pointerDown', 'pointerMove', 'pointerUp',
-  'updatePointer', 'removePointer',
-];
+function init (scope) {
+  const signals = require('./utils/Signals').new();
 
-// for ignoring browser's simulated mouse events
-let prevTouchTime = 0;
+  scope.Interaction = {
+    signals,
+    new (options) {
+      options.signals = signals;
 
-// all active and idle interactions
-scope.interactions = [];
+      return new Interaction(options);
+    },
+  };
+
+  scope.InteractEvent = require('./InteractEvent');
+
+  signals.on('action-start', function ({ interaction, event }) {
+    interaction._interacting = true;
+    firePrepared(interaction, event, 'start');
+  });
+
+  signals.on('action-move', function ({ interaction, event, preEnd }) {
+    firePrepared(interaction, event, 'move', preEnd);
+
+    // if the action was ended in a listener
+    if (!interaction.interacting()) { return false; }
+  });
+
+  signals.on('action-end', function ({ interaction, event }) {
+    firePrepared(interaction, event, 'end');
+  });
+
+  function firePrepared (interaction, event, phase, preEnd) {
+    const actionName = interaction.prepared.name;
+
+    const newEvent = new scope.InteractEvent(interaction, event, actionName, phase, interaction.element, null, preEnd);
+
+    interaction.target.fire(newEvent);
+    interaction.prevEvent = newEvent;
+  }
+
+  scope.actions = {
+    firePrepared,
+    names: [],
+    methodDict: {},
+  };
+}
 
 class Interaction {
-  constructor ({ pointerType }) {
-    this.target        = null; // current interactable being interacted with
-    this.element       = null; // the target element of the interactable
+  /** */
+  constructor ({ pointerType, signals }) {
+    this._signals = signals;
 
-    this.prepared      = {     // action that's ready to be fired on next move event
+    this.target   = null; // current interactable being interacted with
+    this.element  = null; // the target element of the interactable
+    this.prepared = {     // action that's ready to be fired on next move event
       name : null,
       axis : null,
       edges: null,
@@ -73,18 +103,17 @@ class Interaction {
     this.pointerIsDown   = false;
     this.pointerWasMoved = false;
     this._interacting    = false;
+    this._ending         = false;
 
     this.pointerType = pointerType;
 
-    signals.fire('new', this);
-
-    scope.interactions.push(this);
+    this._signals.fire('new', this);
   }
 
   pointerDown (pointer, event, eventTarget) {
-    const pointerIndex = this.updatePointer(pointer, event, true);
+    const pointerIndex = this.updatePointer(pointer, event, eventTarget, true);
 
-    signals.fire('down', {
+    this._signals.fire('down', {
       pointer,
       event,
       eventTarget,
@@ -93,38 +122,37 @@ class Interaction {
     });
   }
 
-  /*\
-   * Interaction.start
-   [ method ]
+  /**
+   * ```js
+   * interact(target)
+   *   .draggable({
+   *     // disable the default drag start by down->move
+   *     manualStart: true
+   *   })
+   *   // start dragging after the user holds the pointer down
+   *   .on('hold', function (event) {
+   *     var interaction = event.interaction;
+   *
+   *     if (!interaction.interacting()) {
+   *       interaction.start({ name: 'drag' },
+   *                         event.interactable,
+   *                         event.currentTarget);
+   *     }
+   * });
+   * ```
    *
    * Start an action with the given Interactable and Element as tartgets. The
-   * action must be enabled for the target Interactable and an appropriate number
-   * of pointers must be held down - 1 for drag/resize, 2 for gesture.
+   * action must be enabled for the target Interactable and an appropriate
+   * number of pointers must be held down - 1 for drag/resize, 2 for gesture.
    *
    * Use it with `interactable.<action>able({ manualStart: false })` to always
    * [start actions manually](https://github.com/taye/interact.js/issues/114)
    *
-   - action  (object)  The action to be performed - drag, resize, etc.
-   - target  (Interactable) The Interactable to target
-   - element (Element) The DOM Element to target
-   = (object) interact
-   **
-   | interact(target)
-   |   .draggable({
-   |     // disable the default drag start by down->move
-   |     manualStart: true
-   |   })
-   |   // start dragging after the user holds the pointer down
-   |   .on('hold', function (event) {
-   |     var interaction = event.interaction;
-   |
-   |     if (!interaction.interacting()) {
-   |       interaction.start({ name: 'drag' },
-   |                         event.interactable,
-   |                         event.currentTarget);
-   |     }
-   | });
-   \*/
+   * @param {object} action   The action to be performed - drag, resize, etc.
+   * @param {Interactable} target  The Interactable to target
+   * @param {Element} element The DOM Element to target
+   * @return {object} interact
+   */
   start (action, target, element) {
     if (this.interacting()
         || !this.pointerIsDown
@@ -132,17 +160,11 @@ class Interaction {
       return;
     }
 
-    // if this interaction had been removed after stopping
-    // add it back
-    if (utils.indexOf(scope.interactions, this) === -1) {
-      scope.interactions.push(this);
-    }
-
     utils.copyAction(this.prepared, action);
     this.target         = target;
     this.element        = element;
 
-    signals.fire('action-start', {
+    this._signals.fire('action-start', {
       interaction: this,
       event: this.downEvent,
     });
@@ -150,7 +172,7 @@ class Interaction {
 
   pointerMove (pointer, event, eventTarget) {
     if (!this.simulation) {
-      this.updatePointer(pointer);
+      this.updatePointer(pointer, event, eventTarget, false);
       utils.setCoords(this.curCoords, this.pointers);
     }
 
@@ -187,7 +209,7 @@ class Interaction {
       utils.setCoordDeltas(this.pointerDelta, this.prevCoords, this.curCoords);
     }
 
-    signals.fire('move', signalArg);
+    this._signals.fire('move', signalArg);
 
     if (!duplicateMove) {
       // if interacting, fire an 'action-move' signal etc
@@ -201,26 +223,24 @@ class Interaction {
     }
   }
 
-  /*\
-   * Interaction.doMove
-   [ method ]
+  /**
+   * ```js
+   * interact(target)
+   *   .draggable(true)
+   *   .on('dragmove', function (event) {
+   *     if (someCondition) {
+   *       // change the snap settings
+   *       event.interactable.draggable({ snap: { targets: [] }});
+   *       // fire another move event with re-calculated snap
+   *       event.interaction.doMove();
+   *     }
+   *   });
+   * ```
    *
    * Force a move of the current action at the same coordinates. Useful if
    * snap/restrict has been changed and you want a movement with the new
    * settings.
-   *
-   **
-   | interact(target)
-   |   .draggable(true)
-   |   .on('dragmove', function (event) {
-   |     if (someCondition) {
-   |       // change the snap settings
-   |       event.interactable.draggable({ snap: { targets: [] }});
-   |       // fire another move event with re-calculated snap
-   |       event.interaction.doMove();
-   |     }
-   |   });
-   \*/
+   */
   doMove (signalArg) {
     signalArg = utils.extend({
       pointer: this.pointers[0],
@@ -229,10 +249,10 @@ class Interaction {
       interaction: this,
     }, signalArg || {});
 
-    signals.fire('before-action-move', signalArg);
+    this._signals.fire('before-action-move', signalArg);
 
     if (!this._dontFireMove) {
-      signals.fire('action-move', signalArg);
+      this._signals.fire('action-move', signalArg);
     }
 
     this._dontFireMove = false;
@@ -242,7 +262,7 @@ class Interaction {
   pointerUp (pointer, event, eventTarget, curEventTarget) {
     const pointerIndex = this.getPointerIndex(pointer);
 
-    signals.fire(/cancel$/i.test(event.type)? 'cancel' : 'up', {
+    this._signals.fire(/cancel$/i.test(event.type)? 'cancel' : 'up', {
       pointer,
       pointerIndex,
       event,
@@ -259,36 +279,42 @@ class Interaction {
     this.removePointer(pointer, event);
   }
 
-  /*\
-   * Interaction.end
-   [ method ]
+  documentBlur (event) {
+    this.end(event);
+    this._signals.fire('blur', { event, interaction: this });
+  }
+
+  /**
+   * ```js
+   * interact(target)
+   *   .draggable(true)
+   *   .on('move', function (event) {
+   *     if (event.pageX > 1000) {
+   *       // end the current action
+   *       event.interaction.end();
+   *       // stop all further listeners from being called
+   *       event.stopImmediatePropagation();
+   *     }
+   *   });
+   * ```
    *
    * Stop the current action and fire an end event. Inertial movement does
    * not happen.
    *
-   - event (PointerEvent) #optional
-   **
-   | interact(target)
-   |   .draggable(true)
-   |   .on('move', function (event) {
-   |     if (event.pageX > 1000) {
-   |       // end the current action
-   |       event.interaction.end();
-   |       // stop all further listeners from being called
-   |       event.stopImmediatePropagation();
-   |     }
-   |   });
-   \*/
+   * @param {PointerEvent} [event]
+   */
   end (event) {
+    this._ending = true;
     event = event || this.prevEvent;
 
     if (this.interacting()) {
-      signals.fire('action-end', {
+      this._signals.fire('action-end', {
         event,
         interaction: this,
       });
     }
 
+    this._ending = false;
     this.stop();
   }
 
@@ -300,12 +326,13 @@ class Interaction {
     return this._interacting;
   }
 
+  /** */
   stop () {
-    signals.fire('stop', { interaction: this });
+    this._signals.fire('stop', { interaction: this });
 
     if (this._interacting) {
-      signals.fire('stop-active', { interaction: this });
-      signals.fire('stop-' + this.prepared.name, { interaction: this });
+      this._signals.fire('stop-active', { interaction: this });
+      this._signals.fire('stop-' + this.prepared.name, { interaction: this });
     }
 
     this.target = this.element = null;
@@ -320,10 +347,10 @@ class Interaction {
       return 0;
     }
 
-    return utils.indexOf(this.pointerIds, utils.getPointerId(pointer));
+    return this.pointerIds.indexOf(utils.getPointerId(pointer));
   }
 
-  updatePointer (pointer, event, down = event && /(down|start)$/i.test(event.type)) {
+  updatePointer (pointer, event, eventTarget, down = event && /(down|start)$/i.test(event.type)) {
     const id = utils.getPointerId(pointer);
     let index = this.getPointerIndex(pointer);
 
@@ -333,9 +360,28 @@ class Interaction {
     }
 
     if (down) {
-      signals.fire('update-pointer-down', {
+      this.pointerIds[index] = id;
+      this.pointers[index]   = pointer;
+      this.pointerIsDown     = true;
+
+      if (!this.interacting()) {
+        utils.setCoords(this.startCoords, this.pointers);
+
+        utils.copyCoords(this.curCoords , this.startCoords);
+        utils.copyCoords(this.prevCoords, this.startCoords);
+
+        this.downEvent          = event;
+        this.downTimes[index]   = this.curCoords.timeStamp;
+        this.downTargets[index] = eventTarget;
+        this.pointerWasMoved    = false;
+
+        utils.pointerExtend(this.downPointer, pointer);
+      }
+
+      this._signals.fire('update-pointer-down', {
         pointer,
         event,
+        eventTarget,
         down,
         pointerId: id,
         pointerIndex: index,
@@ -353,7 +399,7 @@ class Interaction {
 
     if (index === -1) { return; }
 
-    signals.fire('remove-pointer', {
+    this._signals.fire('remove-pointer', {
       pointer,
       event,
       pointerIndex: index,
@@ -372,141 +418,9 @@ class Interaction {
   }
 }
 
-for (let i = 0, len = methodNames.length; i < len; i++) {
-  const method = methodNames[i];
-
-  listeners[method] = doOnInteractions(method);
-}
-
-function doOnInteractions (method) {
-  return (function (event) {
-    const pointerType = utils.getPointerType(event);
-    const [eventTarget, curEventTarget] = utils.getEventTargets(event);
-    const matches = []; // [ [pointer, interaction], ...]
-
-    if (browser.supportsTouch && /touch/.test(event.type)) {
-      prevTouchTime = new Date().getTime();
-
-      for (let i = 0; i < event.changedTouches.length; i++) {
-        const pointer = event.changedTouches[i];
-        const interaction = finder.search(pointer, event.type, eventTarget);
-
-        matches.push([pointer, interaction || new Interaction({ pointerType })]);
-      }
-    }
-    else {
-      let invalidPointer = false;
-
-      if (!browser.supportsPointerEvent && /mouse/.test(event.type)) {
-        // ignore mouse events while touch interactions are active
-        for (let i = 0; i < scope.interactions.length && !invalidPointer; i++) {
-          invalidPointer = scope.interactions[i].pointerType !== 'mouse' && scope.interactions[i].pointerIsDown;
-        }
-
-        // try to ignore mouse events that are simulated by the browser
-        // after a touch event
-        invalidPointer = invalidPointer
-          || (new Date().getTime() - prevTouchTime < 500)
-          // on iOS and Firefox Mobile, MouseEvent.timeStamp is zero if simulated
-          || event.timeStamp === 0;
-      }
-
-      if (!invalidPointer) {
-        let interaction = finder.search(event, event.type, eventTarget);
-
-        if (!interaction) {
-          interaction = new Interaction({ pointerType });
-        }
-
-        matches.push([event, interaction]);
-      }
-    }
-
-    for (const [pointer, interaction] of matches) {
-      interaction._updateEventTargets(eventTarget, curEventTarget);
-      interaction[method](pointer, event, eventTarget, curEventTarget);
-    }
-  });
-}
-
-function endAll (event) {
-  for (let i = 0; i < scope.interactions.length; i++) {
-    const interaction = scope.interactions[i];
-
-    interaction.end(event);
-    signals.fire('endall', { event, interaction });
-  }
-}
-
-const docEvents = { /* 'eventType': listenerFunc */ };
-const pEventTypes = browser.pEventTypes;
-
-if (domObjects.PointerEvent) {
-  docEvents[pEventTypes.down  ] = listeners.pointerDown;
-  docEvents[pEventTypes.move  ] = listeners.pointerMove;
-  docEvents[pEventTypes.up    ] = listeners.pointerUp;
-  docEvents[pEventTypes.cancel] = listeners.pointerUp;
-}
-else {
-  docEvents.mousedown   = listeners.pointerDown;
-  docEvents.mousemove   = listeners.pointerMove;
-  docEvents.mouseup     = listeners.pointerUp;
-
-  docEvents.touchstart  = listeners.pointerDown;
-  docEvents.touchmove   = listeners.pointerMove;
-  docEvents.touchend    = listeners.pointerUp;
-  docEvents.touchcancel = listeners.pointerUp;
-}
-
-docEvents.blur = endAll;
-
-function onDocSignal ({ doc }, signalName) {
-  const eventMethod = signalName.indexOf('add') === 0
-    ? events.add : events.remove;
-
-  // delegate event listener
-  for (const eventType in scope.delegatedEvents) {
-    eventMethod(doc, eventType, events.delegateListener);
-    eventMethod(doc, eventType, events.delegateUseCapture, true);
-  }
-
-  for (const eventType in docEvents) {
-    eventMethod(doc, eventType, docEvents[eventType]);
-  }
-}
-
-signals.on('update-pointer-down', ({ interaction, pointer, pointerId, pointerIndex, event, eventTarget, down }) => {
-  interaction.pointerIds[pointerIndex] = pointerId;
-  interaction.pointers[pointerIndex] = pointer;
-
-  if (down) {
-    interaction.pointerIsDown = true;
-  }
-
-  if (!interaction.interacting()) {
-    utils.setCoords(interaction.startCoords, interaction.pointers);
-
-    utils.copyCoords(interaction.curCoords , interaction.startCoords);
-    utils.copyCoords(interaction.prevCoords, interaction.startCoords);
-
-    interaction.downEvent                 = event;
-    interaction.downTimes[pointerIndex]   = interaction.curCoords.timeStamp;
-    interaction.downTargets[pointerIndex] = eventTarget || event && utils.getEventTargets(event)[0];
-    interaction.pointerWasMoved           = false;
-
-    utils.pointerExtend(interaction.downPointer, pointer);
-  }
-});
-
-scope.signals.on('add-document'   , onDocSignal);
-scope.signals.on('remove-document', onDocSignal);
-
 Interaction.pointerMoveTolerance = 1;
-Interaction.doOnInteractions = doOnInteractions;
-Interaction.endAll = endAll;
-Interaction.signals = signals;
-Interaction.docEvents = docEvents;
 
-scope.endAllInteractions = endAll;
-
-module.exports = Interaction;
+module.exports = {
+  Interaction,
+  init,
+};

@@ -1,19 +1,17 @@
-const PointerEvent = require('./PointerEvent');
-const Interaction  = require('../Interaction');
 const utils        = require('../utils');
-const browser      = require('../utils/browser');
-const defaults     = require('../defaultOptions');
+const PointerEvent = require('./PointerEvent');
 const signals      = require('../utils/Signals').new();
-const { filter }   = require('../utils/arr');
 
 const simpleSignals = [ 'down', 'up', 'cancel' ];
 const simpleEvents  = [ 'down', 'up', 'cancel' ];
 
-const pointerEvents = {
+const pointerEvents = module.exports = {
+  init,
+  signals,
   PointerEvent,
   fire,
   collectEventTargets,
-  signals,
+  createSignalListener,
   defaults: {
     holdDuration: 600,
     ignoreFrom  : null,
@@ -121,113 +119,115 @@ function collectEventTargets ({ interaction, pointer, event, eventTarget, type }
   }
 
   if (type === 'hold') {
-    signalArg.targets = filter(signalArg.targets, target =>
+    signalArg.targets = signalArg.targets.filter(target =>
       target.eventable.options.holdDuration === interaction.holdTimers[pointerIndex].duration);
   }
 
   return signalArg.targets;
 }
 
-Interaction.signals.on('update-pointer-down', function ({ interaction, pointerIndex }) {
-  interaction.holdTimers[pointerIndex] = { duration: Infinity, timeout: null };
-});
+function init (scope) {
+  const {
+    Interaction,
+  } = scope;
 
-Interaction.signals.on('remove-pointer', function ({ interaction, pointerIndex }) {
-  interaction.holdTimers.splice(pointerIndex, 1);
-});
+  scope.pointerEvents = pointerEvents;
+  scope.defaults.pointerEvents = pointerEvents.defaults;
 
-Interaction.signals.on('move', function ({ interaction, pointer, event, eventTarget, duplicateMove }) {
-  const pointerIndex = interaction.getPointerIndex(pointer);
+  Interaction.signals.on('new', interaction => {
+    interaction.prevTap    = null;  // the most recent tap event on this interaction
+    interaction.tapTime    = 0;     // time of the most recent tap event
+    interaction.holdTimers = [];    // [{ duration, timeout }]
+  });
 
-  if (!duplicateMove && (!interaction.pointerIsDown || interaction.pointerWasMoved)) {
-    if (interaction.pointerIsDown) {
-      clearTimeout(interaction.holdTimers[pointerIndex].timeout);
-    }
+  Interaction.signals.on('update-pointer-down', function ({ interaction, pointerIndex }) {
+    interaction.holdTimers[pointerIndex] = { duration: Infinity, timeout: null };
+  });
 
-    fire({
-      interaction, pointer, event, eventTarget,
-      type: 'move',
-    });
-  }
-});
+  Interaction.signals.on('remove-pointer', function ({ interaction, pointerIndex }) {
+    interaction.holdTimers.splice(pointerIndex, 1);
+  });
 
-Interaction.signals.on('down', function ({ interaction, pointer, event, eventTarget, pointerIndex }) {
-  // copy event to be used in timeout for IE8
-  const eventCopy = browser.isIE8? utils.extend({}, event) : event;
+  Interaction.signals.on('move', function ({ interaction, pointer, event, eventTarget, duplicateMove }) {
+    const pointerIndex = interaction.getPointerIndex(pointer);
 
-  const timer = interaction.holdTimers[pointerIndex];
-  const path = utils.getPath(eventTarget);
-  const signalArg = {
-    interaction,
-    pointer,
-    event,
-    eventTarget,
-    type: 'hold',
-    targets: [],
-    path,
-    element: null,
-  };
+    if (!duplicateMove && (!interaction.pointerIsDown || interaction.pointerWasMoved)) {
+      if (interaction.pointerIsDown) {
+        clearTimeout(interaction.holdTimers[pointerIndex].timeout);
+      }
 
-  for (const element of path) {
-    signalArg.element = element;
-
-    signals.fire('collect-targets', signalArg);
-  }
-
-  if (!signalArg.targets.length) { return; }
-
-  let minDuration = Infinity;
-
-  for (let i = 0; i < signalArg.targets.length; i++) {
-    const target = signalArg.targets[i];
-    const holdDuration = target.eventable.options.holdDuration;
-
-    if (holdDuration < minDuration) {
-      minDuration = holdDuration;
-    }
-  }
-
-  timer.duration = minDuration;
-  timer.timeout = setTimeout(function () {
-    fire({
-      interaction,
-      eventTarget,
-      pointer: browser.isIE8? eventCopy : pointer,
-      event: eventCopy,
-      type: 'hold',
-    });
-  }, minDuration);
-});
-
-Interaction.signals.on('up', ({ interaction, pointer, event, eventTarget }) => {
-  if (!interaction.pointerWasMoved) {
-    fire({ interaction, eventTarget, pointer, event, type: 'tap' });
-  }
-});
-
-['up', 'cancel'].forEach(function (signalName) {
-  Interaction.signals.on(signalName, function ({ interaction, pointerIndex }) {
-    if (interaction.holdTimers[pointerIndex]) {
-      clearTimeout(interaction.holdTimers[pointerIndex].timeout);
+      fire({
+        interaction, pointer, event, eventTarget,
+        type: 'move',
+      });
     }
   });
-});
+
+  Interaction.signals.on('down', function ({ interaction, pointer, event, eventTarget, pointerIndex }) {
+    const timer = interaction.holdTimers[pointerIndex];
+    const path = utils.getPath(eventTarget);
+    const signalArg = {
+      interaction,
+      pointer,
+      event,
+      eventTarget,
+      type: 'hold',
+      targets: [],
+      path,
+      element: null,
+    };
+
+    for (const element of path) {
+      signalArg.element = element;
+
+      signals.fire('collect-targets', signalArg);
+    }
+
+    if (!signalArg.targets.length) { return; }
+
+    let minDuration = Infinity;
+
+    for (const target of signalArg.targets) {
+      const holdDuration = target.eventable.options.holdDuration;
+
+      if (holdDuration < minDuration) {
+        minDuration = holdDuration;
+      }
+    }
+
+    timer.duration = minDuration;
+    timer.timeout = setTimeout(function () {
+      fire({
+        interaction,
+        eventTarget,
+        pointer,
+        event,
+        type: 'hold',
+      });
+    }, minDuration);
+  });
+
+  Interaction.signals.on('up', ({ interaction, pointer, event, eventTarget }) => {
+    if (!interaction.pointerWasMoved) {
+      fire({ interaction, eventTarget, pointer, event, type: 'tap' });
+    }
+  });
+
+  for (const signalName of ['up', 'cancel']) {
+    Interaction.signals.on(signalName, function ({ interaction, pointerIndex }) {
+      if (interaction.holdTimers[pointerIndex]) {
+        clearTimeout(interaction.holdTimers[pointerIndex].timeout);
+      }
+    });
+  }
+
+  for (let i = 0; i < simpleSignals.length; i++) {
+    Interaction.signals.on(simpleSignals[i], createSignalListener(simpleEvents[i]));
+  }
+}
 
 function createSignalListener (type) {
   return function ({ interaction, pointer, event, eventTarget }) {
     fire({ interaction, eventTarget, pointer, event, type });
   };
 }
-
-for (let i = 0; i < simpleSignals.length; i++) {
-  Interaction.signals.on(simpleSignals[i], createSignalListener(simpleEvents[i]));
-}
-
-Interaction.signals.on('new', function (interaction) {
-  interaction.prevTap    = null;  // the most recent tap event on this interaction
-  interaction.tapTime    = 0;     // time of the most recent tap event
-  interaction.holdTimers = [];    // [{ duration, timeout }]
-});
-
-defaults.pointerEvents = pointerEvents.defaults;
-module.exports = pointerEvents;

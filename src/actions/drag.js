@@ -1,41 +1,36 @@
-const actions        = require('./base');
-const utils          = require('../utils');
-const InteractEvent  = require('../InteractEvent');
-const Interactable   = require('../Interactable');
-const Interaction    = require('../Interaction');
-const defaultOptions = require('../defaultOptions');
+const utils = require('../utils');
 
-const drag = {
-  defaults: {
-    enabled     : false,
-    mouseButtons: null,
+function init (scope) {
+  const {
+    actions,
+    InteractEvent,
+    Interactable,
+    Interaction,
+    defaults,
+  } = scope;
 
-    origin    : null,
-    snap      : null,
-    restrict  : null,
-    inertia   : null,
-    autoScroll: null,
+  Interaction.signals.on('before-action-move', beforeMove);
 
-    startAxis : 'xy',
-    lockAxis  : 'xy',
-  },
+  // dragmove
+  InteractEvent.signals.on('new', newInteractEvent);
 
-  checker: function (pointer, event, interactable) {
-    const dragOptions = interactable.options.drag;
+  Interactable.prototype.draggable = module.exports.draggable;
 
-    return dragOptions.enabled
-      ? { name: 'drag', axis: (dragOptions.lockAxis === 'start'
-                               ? dragOptions.startAxis
-                               : dragOptions.lockAxis)}
-      : null;
-  },
+  actions.drag = module.exports;
+  actions.names.push('drag');
+  utils.merge(Interactable.eventTypes, [
+    'dragstart',
+    'dragmove',
+    'draginertiastart',
+    'draginertiaresume',
+    'dragend',
+  ]);
+  actions.methodDict.drag = 'draggable';
 
-  getCursor: function () {
-    return 'move';
-  },
-};
+  defaults.drag = module.exports.defaults;
+}
 
-Interaction.signals.on('before-action-move', function ({ interaction }) {
+function beforeMove ({ interaction }) {
   if (interaction.prepared.name !== 'drag') { return; }
 
   const axis = interaction.prepared.axis;
@@ -58,10 +53,9 @@ Interaction.signals.on('before-action-move', function ({ interaction }) {
     interaction.pointerDelta.client.vx = 0;
     interaction.pointerDelta.page.vx   = 0;
   }
-});
+}
 
-// dragmove
-InteractEvent.signals.on('new', function ({ iEvent, interaction }) {
+function newInteractEvent ({ iEvent, interaction }) {
   if (iEvent.type !== 'dragmove') { return; }
 
   const axis = interaction.prepared.axis;
@@ -76,45 +70,48 @@ InteractEvent.signals.on('new', function ({ iEvent, interaction }) {
     iEvent.clientX = interaction.startCoords.client.x;
     iEvent.dx = 0;
   }
-});
+}
 
-/*\
- * Interactable.draggable
- [ method ]
+/**
+ * ```js
+ * interact(element).draggable({
+ *     onstart: function (event) {},
+ *     onmove : function (event) {},
+ *     onend  : function (event) {},
  *
- * Gets or sets whether drag actions can be performed on the
- * Interactable
+ *     // the axis in which the first movement must be
+ *     // for the drag sequence to start
+ *     // 'xy' by default - any direction
+ *     startAxis: 'x' || 'y' || 'xy',
  *
- = (boolean) Indicates if this can be the target of drag events
- | var isDraggable = interact('ul li').draggable();
- * or
- - options (boolean | object) #optional true/false or An object with event listeners to be fired on drag events (object makes the Interactable draggable)
- = (object) This Interactable
- | interact(element).draggable({
- |     onstart: function (event) {},
- |     onmove : function (event) {},
- |     onend  : function (event) {},
- |
- |     // the axis in which the first movement must be
- |     // for the drag sequence to start
- |     // 'xy' by default - any direction
- |     startAxis: 'x' || 'y' || 'xy',
- |
- |     // 'xy' by default - don't restrict to one axis (move in any direction)
- |     // 'x' or 'y' to restrict movement to either axis
- |     // 'start' to restrict movement to the axis the drag started in
- |     lockAxis: 'x' || 'y' || 'xy' || 'start',
- |
- |     // max number of drags that can happen concurrently
- |     // with elements of this Interactable. Infinity by default
- |     max: Infinity,
- |
- |     // max number of drags that can target the same element+Interactable
- |     // 1 by default
- |     maxPerElement: 2
- | });
-\*/
-Interactable.prototype.draggable = function (options) {
+ *     // 'xy' by default - don't restrict to one axis (move in any direction)
+ *     // 'x' or 'y' to restrict movement to either axis
+ *     // 'start' to restrict movement to the axis the drag started in
+ *     lockAxis: 'x' || 'y' || 'xy' || 'start',
+ *
+ *     // max number of drags that can happen concurrently
+ *     // with elements of this Interactable. Infinity by default
+ *     max: Infinity,
+ *
+ *     // max number of drags that can target the same element+Interactable
+ *     // 1 by default
+ *     maxPerElement: 2
+ * });
+ *
+ * var isDraggable = interact('element').draggable(); // true
+ * ```
+ *
+ * Get or set whether drag actions can be performed on the target
+ *
+ * @alias Interactable.prototype.draggable
+ *
+ * @param {boolean | object} [options] true/false or An object with event
+ * listeners to be fired on drag events (object makes the Interactable
+ * draggable)
+ * @return {boolean | Interactable} boolean indicating if this can be the
+ * target of drag events, or this Interctable
+ */
+function draggable (options) {
   if (utils.is.object(options)) {
     this.options.drag.enabled = options.enabled === false? false: true;
     this.setPerAction('drag', options);
@@ -141,19 +138,41 @@ Interactable.prototype.draggable = function (options) {
   }
 
   return this.options.drag;
+}
+
+module.exports = {
+  init,
+  draggable,
+  beforeMove,
+  newInteractEvent,
+  defaults: {
+    enabled     : false,
+    mouseButtons: null,
+
+    origin    : null,
+    snap      : null,
+    restrict  : null,
+    inertia   : null,
+    autoScroll: null,
+
+    startAxis : 'xy',
+    lockAxis  : 'xy',
+  },
+
+  checker (pointer, event, interactable) {
+    const dragOptions = interactable.options.drag;
+
+    return dragOptions.enabled
+      ? {
+        name: 'drag',
+        axis: (dragOptions.lockAxis === 'start'
+          ? dragOptions.startAxis
+          : dragOptions.lockAxis),
+      }
+      : null;
+  },
+
+  getCursor () {
+    return 'move';
+  },
 };
-
-actions.drag = drag;
-actions.names.push('drag');
-utils.merge(Interactable.eventTypes, [
-  'dragstart',
-  'dragmove',
-  'draginertiastart',
-  'draginertiaresume',
-  'dragend',
-]);
-actions.methodDict.drag = 'draggable';
-
-defaultOptions.drag = drag.defaults;
-
-module.exports = drag;

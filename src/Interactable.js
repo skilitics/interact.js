@@ -1,7 +1,6 @@
 const is        = require('./utils/is');
 const events    = require('./utils/events');
 const extend    = require('./utils/extend');
-const actions   = require('./actions/base');
 const scope     = require('./scope');
 const Eventable = require('./Eventable');
 const defaults  = require('./defaultOptions');
@@ -11,38 +10,33 @@ const {
   getElementRect,
   nodeContains,
   trySelector,
-}                           = require('./utils/domUtils');
-const { getWindow }         = require('./utils/window');
-const { indexOf, contains } = require('./utils/arr');
-const { wheelEvent }        = require('./utils/browser');
+  matchesSelector,
+}                    = require('./utils/domUtils');
+const { getWindow }  = require('./utils/window');
+const { contains }   = require('./utils/arr');
+const { wheelEvent } = require('./utils/browser');
 
 // all set interactables
 scope.interactables = [];
 
-/*\
- * Interactable
- [ property ]
- **
- * Object type returned by @interact
-\*/
 class Interactable {
+  /** */
   constructor (target, options) {
-    options = options || {};
-
+    this._signals = options.signals || Interactable.signals;
     this.target   = target;
     this.events   = new Eventable();
     this._context = options.context || scope.document;
     this._win     = getWindow(trySelector(target)? this._context : target);
     this._doc     = this._win.document;
 
-    signals.fire('new', {
+    this._signals.fire('new', {
       target,
       options,
       interactable: this,
       win: this._win,
     });
 
-    scope.addDocument( this._doc, this._win );
+    scope.addDocument(this._doc);
 
     scope.interactables.push(this);
 
@@ -85,24 +79,13 @@ class Interactable {
     }
   }
 
-  /*\
-   * Interactable.getRect
-   [ method ]
-   *
+  /**
    * The default function to get an Interactables bounding rect. Can be
-   * overridden using @Interactable.rectChecker.
+   * overridden using {@link Interactable.rectChecker}.
    *
-   - element (Element) #optional The element to measure.
-   = (object) The object's bounding rectangle.
-   o {
-   o     top   : 0,
-   o     left  : 0,
-   o     bottom: 0,
-   o     right : 0,
-   o     width : 0,
-   o     height: 0
-   o }
-  \*/
+   * @param {Element} [element] The element to measure.
+   * @return {object} The object's bounding rectangle.
+   */
   getRect (element) {
     element = element || this.target;
 
@@ -113,16 +96,14 @@ class Interactable {
     return getElementRect(element);
   }
 
-  /*\
-   * Interactable.rectChecker
-   [ method ]
-   *
+  /**
    * Returns or sets the function used to calculate the interactable's
    * element's rectangle
    *
-   - checker (function) #optional A function which returns this Interactable's bounding rectangle. See @Interactable.getRect
-   = (function | object) The checker function or this Interactable
-  \*/
+   * @param {function} [checker] A function which returns this Interactable's
+   * bounding rectangle. See {@link Interactable.getRect}
+   * @return {function | object} The checker function or this Interactable
+   */
   rectChecker (checker) {
     if (is.function(checker)) {
       this.getRect = checker;
@@ -143,7 +124,7 @@ class Interactable {
     if (trySelector(newValue) || is.object(newValue)) {
       this.options[optionName] = newValue;
 
-      for (const action of actions.names) {
+      for (const action of scope.actions.names) {
         this.options[action][optionName] = newValue;
       }
 
@@ -153,33 +134,28 @@ class Interactable {
     return this.options[optionName];
   }
 
-  /*\
-   * Interactable.origin
-   [ method ]
-   *
+  /**
    * Gets or sets the origin of the Interactable's element.  The x and y
    * of the origin will be subtracted from action event coordinates.
    *
-   - origin (object | string) #optional An object eg. { x: 0, y: 0 } or string 'parent', 'self' or any CSS selector
-   * OR
-   - origin (Element) #optional An HTML or SVG Element whose rect will be used
-   **
-   = (object) The current origin or this Interactable
-  \*/
+   * @param {Element | object | string} [origin] An HTML or SVG Element whose
+   * rect will be used, an object eg. { x: 0, y: 0 } or string 'parent', 'self'
+   * or any CSS selector
+   *
+   * @return {object} The current origin or this Interactable
+   */
   origin (newValue) {
     return this._backCompatOption('origin', newValue);
   }
 
-  /*\
-   * Interactable.deltaSource
-   [ method ]
-   *
+  /**
    * Returns or sets the mouse coordinate types used to calculate the
    * movement of the pointer.
    *
-   - newValue (string) #optional Use 'client' if you will be scrolling while interacting; Use 'page' if you want autoScroll to work
-   = (string | object) The current deltaSource or this Interactable
-  \*/
+   * @param {string} [newValue] Use 'client' if you will be scrolling while
+   * interacting; Use 'page' if you want autoScroll to work
+   * @return {string | object} The current deltaSource or this Interactable
+   */
   deltaSource (newValue) {
     if (newValue === 'page' || newValue === 'client') {
       this.options.deltaSource = newValue;
@@ -190,15 +166,12 @@ class Interactable {
     return this.options.deltaSource;
   }
 
-  /*\
-   * Interactable.context
-   [ method ]
+  /**
+   * Gets the selector context Node of the Interactable. The default is
+   * `window.document`.
    *
-   * Gets the selector context Node of the Interactable. The default is `window.document`.
-   *
-   = (Node) The context Node of this Interactable
-   **
-  \*/
+   * @return {Node} The context Node of this Interactable
+   */
   context () {
     return this._context;
   }
@@ -208,16 +181,14 @@ class Interactable {
             || nodeContains(this._context, element));
   }
 
-  /*\
-   * Interactable.fire
-   [ method ]
-   *
+  /**
    * Calls listeners for the given InteractEvent type bound globally
    * and directly to this Interactable
    *
-   - iEvent (InteractEvent) The InteractEvent object to be fired on this Interactable
-   = (Interactable) this Interactable
-  \*/
+   * @param {InteractEvent} iEvent The InteractEvent object to be fired on this
+   * Interactable
+   * @return {Interactable} this Interactable
+   */
   fire (iEvent) {
     this.events.fire(iEvent);
 
@@ -230,8 +201,8 @@ class Interactable {
     }
 
     if (is.array(eventType)) {
-      for (let i = 0; i < eventType.length; i++) {
-        this[method](eventType[i], listener, options);
+      for (const type of eventType) {
+        this[method](type, listener, options);
       }
 
       return true;
@@ -246,17 +217,16 @@ class Interactable {
     }
   }
 
-  /*\
-   * Interactable.on
-   [ method ]
-   *
+  /**
    * Binds a listener for an InteractEvent, pointerEvent or DOM event.
    *
-   - eventType  (string | array | object) The types of events to listen for
-   - listener   (function) The function event (s)
-   - options    (object | boolean) #optional options object or useCapture flag for addEventListener
-   = (object) This Interactable
-  \*/
+   * @param {string | array | object} eventType  The types of events to listen
+   * for
+   * @param {function} listener   The function event (s)
+   * @param {object | boolean} [options]    options object or useCapture flag
+   * for addEventListener
+   * @return {object} This Interactable
+   */
   on (eventType, listener, options) {
     if (this._onOffMultiple('on', eventType, listener, options)) {
       return this;
@@ -278,17 +248,16 @@ class Interactable {
     return this;
   }
 
-  /*\
-   * Interactable.off
-   [ method ]
-   *
+  /**
    * Removes an InteractEvent, pointerEvent or DOM event listener
    *
-   - eventType  (string | array | object) The types of events that were listened for
-   - listener   (function) The listener function to be removed
-   - options    (object | boolean) #optional options object or useCapture flag for removeEventListener
-   = (object) This Interactable
-  \*/
+   * @param {string | array | object} eventType The types of events that were
+   * listened for
+   * @param {function} listener The listener function to be removed
+   * @param {object | boolean} [options] options object or useCapture flag for
+   * removeEventListener
+   * @return {object} This Interactable
+   */
   off (eventType, listener, options) {
     if (this._onOffMultiple('off', eventType, listener, options)) {
       return this;
@@ -312,14 +281,12 @@ class Interactable {
     return this;
   }
 
-  /*\
-   * Interactable.set
-   [ method ]
-   *
+  /**
    * Reset the options of this Interactable
-   - options (object) The new settings to apply
-   = (object) This Interactable
-  \*/
+   *
+   * @param {object} options The new settings to apply
+   * @return {object} This Interactable
+   */
   set (options) {
     if (!is.object(options)) {
       options = {};
@@ -329,8 +296,8 @@ class Interactable {
 
     const perActions = extend({}, defaults.perAction);
 
-    for (const actionName in actions.methodDict) {
-      const methodName = actions.methodDict[actionName];
+    for (const actionName in scope.actions.methodDict) {
+      const methodName = scope.actions.methodDict[actionName];
 
       this.options[actionName] = extend({}, defaults[actionName]);
 
@@ -347,7 +314,7 @@ class Interactable {
       }
     }
 
-    signals.fire('set', {
+    this._signals.fire('set', {
       options,
       interactable: this,
     });
@@ -355,15 +322,12 @@ class Interactable {
     return this;
   }
 
-  /*\
-   * Interactable.unset
-   [ method ]
+  /**
+   * Remove this interactable from the list of interactables and remove it's
+   * action capabilities and event listeners
    *
-   * Remove this interactable from the list of interactables and remove
-   * it's action capabilities and event listeners
-   *
-   = (object) @interact
-  \*/
+   * @return {interact}
+   */
   unset () {
     events.remove(this.target, 'all');
 
@@ -393,13 +357,13 @@ class Interactable {
       events.remove(this, 'all');
     }
 
-    signals.fire('unset', { interactable: this });
+    this._signals.fire('unset', { interactable: this });
 
-    scope.interactables.splice(indexOf(scope.interactables, this), 1);
+    scope.interactables.splice(scope.interactables.indexOf(this), 1);
 
     // Stop related interactions when an Interactable is unset
     for (const interaction of scope.interactions || []) {
-      if (interaction.target === this && interaction.interacting()) {
+      if (interaction.target === this && interaction.interacting() && interaction._ending) {
         interaction.stop();
       }
     }
@@ -427,17 +391,19 @@ scope.interactables.get = function interactableGet (element, options, dontCheckI
   return ret && (is.string(element) || dontCheckInContext || ret.inContext(element))? ret : null;
 };
 
-scope.interactables.forEachSelector = function (callback, element) {
-  for (let i = 0; i < this.length; i++) {
-    const interactable = this[i];
+scope.interactables.forEachMatch = function (element, callback) {
+  for (const interactable of this) {
+    let ret;
 
-    // skip non CSS selector targets and out of context elements
-    if (!is.string(interactable.target)
-        || (element && !interactable.inContext(element))) {
-      continue;
+    if ((is.string(interactable.target)
+        // target is a selector and the element matches
+        ? (is.element(element) && matchesSelector(element, interactable.target))
+        // target is the element
+        : element === interactable.target)
+        // the element is in context
+      && (interactable.inContext(element))) {
+      ret = callback(interactable);
     }
-
-    const ret = callback(interactable, interactable.target, interactable._context, i, this);
 
     if (ret !== undefined) {
       return ret;
@@ -446,7 +412,7 @@ scope.interactables.forEachSelector = function (callback, element) {
 };
 
 // all interact.js eventTypes
-Interactable.eventTypes = scope.eventTypes = [];
+Interactable.eventTypes = [];
 
 Interactable.signals = signals;
 

@@ -1,90 +1,65 @@
+const is = require('../utils/is');
 const autoStart = require('./base');
-const scope     = require('../scope');
-const browser   = require('../utils/browser');
-const is        = require('../utils/is');
 
-const { matchesSelector, parentNode } = require('../utils/domUtils');
+const { parentNode } = require('../utils/domUtils');
 
-autoStart.setActionDefaults(require('../actions/drag'));
+function init (scope) {
+  const {
+    actions,
+  } = scope;
 
-autoStart.signals.on('before-start',  function ({ interaction, eventTarget, dx, dy }) {
-  if (interaction.prepared.name !== 'drag') { return; }
+  scope.autoStart.setActionDefaults(actions.drag);
 
-  // check if a drag is in the correct axis
-  const absX = Math.abs(dx);
-  const absY = Math.abs(dy);
-  const options = interaction.target.options.drag;
-  const startAxis = options.startAxis;
-  const currentAxis = (absX > absY ? 'x' : absX < absY ? 'y' : 'xy');
+  scope.autoStart.signals.on('before-start',  function ({ interaction, eventTarget, dx, dy }) {
+    if (interaction.prepared.name !== 'drag') { return; }
 
-  interaction.prepared.axis = options.lockAxis === 'start'
-    ? currentAxis[0] // always lock to one axis even if currentAxis === 'xy'
-    : options.lockAxis;
+    // check if a drag is in the correct axis
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    const targetOptions = interaction.target.options.drag;
+    const startAxis = targetOptions.startAxis;
+    const currentAxis = (absX > absY ? 'x' : absX < absY ? 'y' : 'xy');
 
-  // if the movement isn't in the startAxis of the interactable
-  if (currentAxis !== 'xy' && startAxis !== 'xy' && startAxis !== currentAxis) {
-    // cancel the prepared action
-    interaction.prepared.name = null;
+    interaction.prepared.axis = targetOptions.lockAxis === 'start'
+      ? currentAxis[0] // always lock to one axis even if currentAxis === 'xy'
+      : targetOptions.lockAxis;
 
-    // then try to get a drag from another ineractable
+    // if the movement isn't in the startAxis of the interactable
+    if (currentAxis !== 'xy' && startAxis !== 'xy' && startAxis !== currentAxis) {
+      // cancel the prepared action
+      interaction.prepared.name = null;
 
-    if (!interaction.prepared.name) {
-
+      // then try to get a drag from another ineractable
       let element = eventTarget;
 
-      const getDraggable = function (interactable, selector, context) {
-        const elements = browser.useMatchesSelectorPolyfill
-            ? context.querySelectorAll(selector)
-            : undefined;
-
+      const getDraggable = function (interactable) {
         if (interactable === interaction.target) { return; }
 
-        if (!options.manualStart
-            && !interactable.testIgnoreAllow(options, element, eventTarget)
-            && matchesSelector(element, selector, elements)) {
+        const options = interaction.target.options.drag;
 
-          const action = interactable.getAction(interaction.downPointer,
-                                                interaction.downEvent,
-                                                interaction,
-                                                element);
+        if (!options.manualStart
+            && interactable.testIgnoreAllow(options, element, eventTarget)) {
+
+          const action = interactable.getAction(
+            interaction.downPointer, interaction.downEvent, interaction, element);
 
           if (action
               && action.name === 'drag'
               && checkStartAxis(currentAxis, interactable)
-              && autoStart.validateAction(action, interactable, element, eventTarget)) {
+              && autoStart.validateAction(action, interactable, element, eventTarget, scope)) {
 
             return interactable;
           }
         }
       };
 
-      let action = null;
-
       // check all interactables
       while (is.element(element)) {
-        const elementInteractable = scope.interactables.get(element);
+        const interactable = scope.interactables.forEachMatch(element, getDraggable);
 
-        if (elementInteractable
-            && elementInteractable !== interaction.target
-            && !elementInteractable.options.drag.manualStart) {
-
-          action = elementInteractable.getAction(interaction.downPointer, interaction.downEvent, interaction, element);
-        }
-        if (action
-            && action.name === 'drag'
-            && checkStartAxis(currentAxis, elementInteractable)) {
-
+        if (interactable) {
           interaction.prepared.name = 'drag';
-          interaction.target = elementInteractable;
-          interaction.element = element;
-          break;
-        }
-
-        const selectorInteractable = scope.interactables.forEachSelector(getDraggable, element);
-
-        if (selectorInteractable) {
-          interaction.prepared.name = 'drag';
-          interaction.target = selectorInteractable;
+          interaction.target = interactable;
           interaction.element = element;
           break;
         }
@@ -92,13 +67,15 @@ autoStart.signals.on('before-start',  function ({ interaction, eventTarget, dx, 
         element = parentNode(element);
       }
     }
+  });
+
+  function checkStartAxis (startAxis, interactable) {
+    if (!interactable) { return false; }
+
+    const thisAxis = interactable.options.drag.startAxis;
+
+    return (startAxis === 'xy' || thisAxis === 'xy' || thisAxis === startAxis);
   }
-});
-
-function checkStartAxis (startAxis, interactable) {
-  if (!interactable) { return false; }
-
-  const thisAxis = interactable.options.drag.startAxis;
-
-  return (startAxis === 'xy' || thisAxis === 'xy' || thisAxis === startAxis);
 }
+
+module.exports = { init };
