@@ -3,6 +3,8 @@ require('./Interaction');
 // Legacy browser support
 //require('./legacyBrowsers');
 
+require('./Eventable');
+
 // pointerEvents
 require('./pointerEvents/base');
 require('./pointerEvents/PointerEvent');
@@ -17,8 +19,8 @@ require('./pointerEvents/holdRepeat');
 //require('./modifiers/restrict');
 require('./modifiers/restrictSize');
 
-// delay
-//require('./autoStart/delay');
+// autoStart hold
+require('./autoStart/hold');
 
 // actions
 require('./actions/base');

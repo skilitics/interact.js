@@ -19,6 +19,7 @@ let prevTouchTime = 0;
 scope.interactions = [];
 
 class Interaction {
+  /** */
   constructor ({ pointerType }) {
     this.target        = null; // current interactable being interacted with
     this.element       = null; // the target element of the interactable
@@ -93,38 +94,37 @@ class Interaction {
     });
   }
 
-  /*\
-   * Interaction.start
-   [ method ]
+  /**
+   * ```js
+   * interact(target)
+   *   .draggable({
+   *     // disable the default drag start by down->move
+   *     manualStart: true
+   *   })
+   *   // start dragging after the user holds the pointer down
+   *   .on('hold', function (event) {
+   *     var interaction = event.interaction;
+   *
+   *     if (!interaction.interacting()) {
+   *       interaction.start({ name: 'drag' },
+   *                         event.interactable,
+   *                         event.currentTarget);
+   *     }
+   * });
+   * ```
    *
    * Start an action with the given Interactable and Element as tartgets. The
-   * action must be enabled for the target Interactable and an appropriate number
-   * of pointers must be held down - 1 for drag/resize, 2 for gesture.
+   * action must be enabled for the target Interactable and an appropriate
+   * number of pointers must be held down - 1 for drag/resize, 2 for gesture.
    *
    * Use it with `interactable.<action>able({ manualStart: false })` to always
    * [start actions manually](https://github.com/taye/interact.js/issues/114)
    *
-   - action  (object)  The action to be performed - drag, resize, etc.
-   - target  (Interactable) The Interactable to target
-   - element (Element) The DOM Element to target
-   = (object) interact
-   **
-   | interact(target)
-   |   .draggable({
-   |     // disable the default drag start by down->move
-   |     manualStart: true
-   |   })
-   |   // start dragging after the user holds the pointer down
-   |   .on('hold', function (event) {
-   |     var interaction = event.interaction;
-   |
-   |     if (!interaction.interacting()) {
-   |       interaction.start({ name: 'drag' },
-   |                         event.interactable,
-   |                         event.currentTarget);
-   |     }
-   | });
-   \*/
+   * @param {object} action   The action to be performed - drag, resize, etc.
+   * @param {Interactable} target  The Interactable to target
+   * @param {Element} element The DOM Element to target
+   * @return {object} interact
+   */
   start (action, target, element) {
     if (this.interacting()
         || !this.pointerIsDown
@@ -134,7 +134,7 @@ class Interaction {
 
     // if this interaction had been removed after stopping
     // add it back
-    if (utils.indexOf(scope.interactions, this) === -1) {
+    if (scope.interactions.indexOf(this) === -1) {
       scope.interactions.push(this);
     }
 
@@ -201,26 +201,24 @@ class Interaction {
     }
   }
 
-  /*\
-   * Interaction.doMove
-   [ method ]
+  /**
+   * ```js
+   * interact(target)
+   *   .draggable(true)
+   *   .on('dragmove', function (event) {
+   *     if (someCondition) {
+   *       // change the snap settings
+   *       event.interactable.draggable({ snap: { targets: [] }});
+   *       // fire another move event with re-calculated snap
+   *       event.interaction.doMove();
+   *     }
+   *   });
+   * ```
    *
    * Force a move of the current action at the same coordinates. Useful if
    * snap/restrict has been changed and you want a movement with the new
    * settings.
-   *
-   **
-   | interact(target)
-   |   .draggable(true)
-   |   .on('dragmove', function (event) {
-   |     if (someCondition) {
-   |       // change the snap settings
-   |       event.interactable.draggable({ snap: { targets: [] }});
-   |       // fire another move event with re-calculated snap
-   |       event.interaction.doMove();
-   |     }
-   |   });
-   \*/
+   */
   doMove (signalArg) {
     signalArg = utils.extend({
       pointer: this.pointers[0],
@@ -259,26 +257,25 @@ class Interaction {
     this.removePointer(pointer, event);
   }
 
-  /*\
-   * Interaction.end
-   [ method ]
+  /**
+   * ```js
+   * interact(target)
+   *   .draggable(true)
+   *   .on('move', function (event) {
+   *     if (event.pageX > 1000) {
+   *       // end the current action
+   *       event.interaction.end();
+   *       // stop all further listeners from being called
+   *       event.stopImmediatePropagation();
+   *     }
+   *   });
+   * ```
    *
    * Stop the current action and fire an end event. Inertial movement does
    * not happen.
    *
-   - event (PointerEvent) #optional
-   **
-   | interact(target)
-   |   .draggable(true)
-   |   .on('move', function (event) {
-   |     if (event.pageX > 1000) {
-   |       // end the current action
-   |       event.interaction.end();
-   |       // stop all further listeners from being called
-   |       event.stopImmediatePropagation();
-   |     }
-   |   });
-   \*/
+   * @param {PointerEvent} [event]
+   */
   end (event) {
     event = event || this.prevEvent;
 
@@ -300,6 +297,7 @@ class Interaction {
     return this._interacting;
   }
 
+  /** */
   stop () {
     signals.fire('stop', { interaction: this });
 
@@ -320,7 +318,7 @@ class Interaction {
       return 0;
     }
 
-    return utils.indexOf(this.pointerIds, utils.getPointerId(pointer));
+    return this.pointerIds.indexOf(utils.getPointerId(pointer));
   }
 
   updatePointer (pointer, event, down = event && /(down|start)$/i.test(event.type)) {
@@ -372,9 +370,7 @@ class Interaction {
   }
 }
 
-for (let i = 0, len = methodNames.length; i < len; i++) {
-  const method = methodNames[i];
-
+for (const method of methodNames) {
   listeners[method] = doOnInteractions(method);
 }
 
@@ -387,8 +383,8 @@ function doOnInteractions (method) {
     if (browser.supportsTouch && /touch/.test(event.type)) {
       prevTouchTime = new Date().getTime();
 
-      for (let i = 0; i < event.changedTouches.length; i++) {
-        const pointer = event.changedTouches[i];
+      for (const changedTouch of event.changedTouches) {
+        const pointer = changedTouch;
         const interaction = finder.search(pointer, event.type, eventTarget);
 
         matches.push([pointer, interaction || new Interaction({ pointerType })]);
@@ -430,9 +426,7 @@ function doOnInteractions (method) {
 }
 
 function endAll (event) {
-  for (let i = 0; i < scope.interactions.length; i++) {
-    const interaction = scope.interactions[i];
-
+  for (const interaction of scope.interactions) {
     interaction.end(event);
     signals.fire('endall', { event, interaction });
   }

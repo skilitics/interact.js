@@ -53,29 +53,29 @@ InteractEvent.signals.on('new', function ({ iEvent, interaction }) {
   }
 });
 
-/*\
- * Interactable.gesturable
- [ method ]
+/**
+ * ```js
+ * interact(element).gesturable({
+ *     onstart: function (event) {},
+ *     onmove : function (event) {},
+ *     onend  : function (event) {},
  *
- * Gets or sets whether multitouch gestures can be performed on the
- * Interactable's element
+ *     // limit multiple gestures.
+ *     // See the explanation in {@link Interactable.draggable} example
+ *     max: Infinity,
+ *     maxPerElement: 1,
+ * });
  *
- = (boolean) Indicates if this can be the target of gesture events
-   | var isGestureable = interact(element).gesturable();
- * or
- - options (boolean | object) #optional true/false or An object with event listeners to be fired on gesture events (makes the Interactable gesturable)
- = (object) this Interactable
- | interact(element).gesturable({
- |     onstart: function (event) {},
- |     onmove : function (event) {},
- |     onend  : function (event) {},
- |
- |     // limit multiple gestures.
- |     // See the explanation in @Interactable.draggable example
- |     max: Infinity,
- |     maxPerElement: 1,
- | });
-\*/
+ * var isGestureable = interact(element).gesturable();
+ * ```
+ *
+ * Gets or sets whether multitouch gestures can be performed on the target
+ *
+ * @param {boolean | object} [options] true/false or An object with event
+ * listeners to be fired on gesture events (makes the Interactable gesturable)
+ * @return {boolean | Interactable} A boolean indicating if this can be the
+ * target of gesture events, or this Interactable
+ */
 Interactable.prototype.gesturable = function (options) {
   if (utils.is.object(options)) {
     this.options.gesture.enabled = options.enabled === false? false: true;

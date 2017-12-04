@@ -3,7 +3,6 @@ const Interactable   = require('../Interactable');
 const Interaction    = require('../Interaction');
 const actions        = require('../actions/base');
 const defaultOptions = require('../defaultOptions');
-const browser        = require('../utils/browser');
 const scope          = require('../scope');
 const utils          = require('../utils');
 const signals        = require('../utils/Signals').new();
@@ -22,11 +21,16 @@ const autoStart = {
       maxPerElement: 1,
       allowFrom:  null,
       ignoreFrom: null,
+
+      // only allow left button by default
+      // see https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/buttons#Return_value
+      mouseButtons: 1,
     },
   },
   setActionDefaults: function (action) {
     utils.extend(action.defaults, autoStart.defaults.perAction);
   },
+  validateAction,
 };
 
 // set cursor style on mousedown
@@ -39,7 +43,7 @@ Interaction.signals.on('down', function ({ interaction, pointer, event, eventTar
 
 // set cursor style on mousemove
 Interaction.signals.on('move', function ({ interaction, pointer, event, eventTarget }) {
-  if (!interaction.mouse
+  if (interaction.pointerType !== 'mouse'
       || interaction.pointerIsDown
       || interaction.interacting()) { return; }
 
@@ -112,47 +116,23 @@ function getActionInfo (interaction, pointer, event, eventTarget) {
   let matchElements = [];
 
   let element = eventTarget;
-  let action = null;
 
-  function pushMatches (interactable, selector, context) {
-    const elements = (browser.useMatchesSelectorPolyfill
-      ? context.querySelectorAll(selector)
-      : undefined);
-
-    if (utils.matchesSelector(element, selector, elements)) {
-
-      matches.push(interactable);
-      matchElements.push(element);
-    }
+  function pushMatches (interactable) {
+    matches.push(interactable);
+    matchElements.push(element);
   }
 
   while (utils.is.element(element)) {
     matches = [];
     matchElements = [];
 
-    const elementInteractable = scope.interactables.get(element);
+    scope.interactables.forEachMatch(element, pushMatches);
 
-    if (elementInteractable
-        && (action = validateAction(elementInteractable.getAction(pointer, event, interaction, element, eventTarget),
-                                    elementInteractable,
-                                    element,
-                                    eventTarget))
-        && !elementInteractable.options[action.name].manualStart) {
-      return {
-        element,
-        action,
-        target: elementInteractable,
-      };
-    }
-    else {
-      scope.interactables.forEachSelector(pushMatches, element);
+    const actionInfo = validateSelector(interaction, pointer, event, matches, matchElements, eventTarget);
 
-      const actionInfo = validateSelector(interaction, pointer, event, matches, matchElements, eventTarget);
-
-      if (actionInfo.action
-          && !actionInfo.target.options[actionInfo.action.name].manualStart) {
-        return actionInfo;
-      }
+    if (actionInfo.action
+      && !actionInfo.target.options[actionInfo.action.name].manualStart) {
+      return actionInfo;
     }
 
     element = utils.parentNode(element);
@@ -188,112 +168,6 @@ Interaction.signals.on('stop', function ({ interaction }) {
   }
 });
 
-Interactable.prototype.getAction = function (pointer, event, interaction, element) {
-  const action = this.defaultActionChecker(pointer, event, interaction, element);
-
-  if (this.options.actionChecker) {
-    return this.options.actionChecker(pointer, event, action, this, element, interaction);
-  }
-
-  return action;
-};
-
-/*\
- * Interactable.actionChecker
- [ method ]
- *
- * Gets or sets the function used to check action to be performed on
- * pointerDown
- *
- - checker (function | null) #optional A function which takes a pointer event, defaultAction string, interactable, element and interaction as parameters and returns an object with name property 'drag' 'resize' or 'gesture' and optionally an `edges` object with boolean 'top', 'left', 'bottom' and right props.
- = (Function | Interactable) The checker function or this Interactable
- *
- | interact('.resize-drag')
- |   .resizable(true)
- |   .draggable(true)
- |   .actionChecker(function (pointer, event, action, interactable, element, interaction) {
- |
- |   if (interact.matchesSelector(event.target, '.drag-handle') {
- |     // force drag with handle target
- |     action.name = drag;
- |   }
- |   else {
- |     // resize from the top and right edges
- |     action.name  = 'resize';
- |     action.edges = { top: true, right: true };
- |   }
- |
- |   return action;
- | });
-\*/
-Interactable.prototype.actionChecker = function (checker) {
-  if (utils.is.function(checker)) {
-    this.options.actionChecker = checker;
-
-    return this;
-  }
-
-  if (checker === null) {
-    delete this.options.actionChecker;
-
-    return this;
-  }
-
-  return this.options.actionChecker;
-};
-
-/*\
- * Interactable.styleCursor
- [ method ]
- *
- * Returns or sets whether the the cursor should be changed depending on the
- * action that would be performed if the mouse were pressed and dragged.
- *
- - newValue (boolean) #optional
- = (boolean | Interactable) The current setting or this Interactable
-\*/
-Interactable.prototype.styleCursor = function (newValue) {
-  if (utils.is.bool(newValue)) {
-    this.options.styleCursor = newValue;
-
-    return this;
-  }
-
-  if (newValue === null) {
-    delete this.options.styleCursor;
-
-    return this;
-  }
-
-  return this.options.styleCursor;
-};
-
-Interactable.prototype.defaultActionChecker = function (pointer, event, interaction, element) {
-  const rect = this.getRect(element);
-  const buttons = event.buttons || ({
-    0: 1,
-    1: 4,
-    3: 8,
-    4: 16,
-  })[event.button];
-  let action = null;
-
-  for (const actionName of actions.names) {
-    // check mouseButton setting if the pointer is down
-    if (interaction.pointerIsDown
-        && interaction.mouse
-        && (buttons & this.options[actionName].mouseButtons) === 0) {
-      continue;
-    }
-
-    action = actions[actionName].checker(pointer, event, this, element, interaction, rect);
-
-    if (action) {
-      return action;
-    }
-  }
-};
-
 function withinInteractionLimit (interactable, element, action) {
   const options = interactable.options;
   const maxActions = options[action.name].max;
@@ -305,8 +179,7 @@ function withinInteractionLimit (interactable, element, action) {
   // no actions if any of these values == 0
   if (!(maxActions && maxPerElement && autoStart.maxInteractions)) { return; }
 
-  for (let i = 0, len = scope.interactions.length; i < len; i++) {
-    const interaction = scope.interactions[i];
+  for (const interaction of scope.interactions) {
     const otherAction = interaction.prepared.name;
 
     if (!interaction.interacting()) { continue; }
@@ -337,23 +210,22 @@ function withinInteractionLimit (interactable, element, action) {
   return autoStart.maxInteractions > 0;
 }
 
-/*\
- * interact.maxInteractions
- [ method ]
- **
- * Returns or sets the maximum number of concurrent interactions allowed.
- * By default only 1 interaction is allowed at a time (for backwards
- * compatibility). To allow multiple interactions on the same Interactables
- * and elements, you need to enable it in the draggable, resizable and
- * gesturable `'max'` and `'maxPerElement'` options.
- **
- - newValue (number) #optional Any number. newValue <= 0 means no interactions.
-\*/
+/**
+ * Returns or sets the maximum number of concurrent interactions allowed.  By
+ * default only 1 interaction is allowed at a time (for backwards
+ * compatibility). To allow multiple interactions on the same Interactables and
+ * elements, you need to enable it in the draggable, resizable and gesturable
+ * `'max'` and `'maxPerElement'` options.
+ *
+ * @alias module:interact.maxInteractions
+ *
+ * @param {number} [newValue] Any number. newValue <= 0 means no interactions.
+ */
 interact.maxInteractions = function (newValue) {
   if (utils.is.number(newValue)) {
     autoStart.maxInteractions = newValue;
 
-    return this;
+    return interact;
   }
 
   return autoStart.maxInteractions;
